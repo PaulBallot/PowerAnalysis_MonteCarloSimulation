@@ -1,0 +1,211 @@
+---
+title: "Power Analysis - Costello et al. (2024) Expansion"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+### Setup
+
+```{r}
+#install.packages('devtools')
+library(devtools)
+#install.packages('ggplot2')
+library(ggplot2)
+
+#Necessary for the self-implemented Analysis only
+#install.packages('tidyverse')
+library(tidyverse)
+#install.packages('pwr')
+library(pwr)
+#install.packages('jtools')
+library(jtools)
+#install.packages('simr')
+library(simr)
+library(MASS)
+```
+
+
+```{r}
+subjects_min <- 300 # per cell, not 0!
+subjects_max <- 330
+subjects_step <- 1
+current_n = subjects_min
+n_sim = 50000
+mean_pre <- 75 
+sd <- 10 
+Treatment_levels <- c("control", "AI", "human")
+Control_Dummy <- c(1,0,0)
+AI_Dummy <- c(0,1,0)
+Human_Dummy <- c(0,0,1)
+AI_effect <- 0.53
+human_effect <- 0.26
+cor_r_control <- 0.81 #Based on Costello et al. 
+cov_matrix_value_control <- cor_r_control*sqrt(sd*sd*sd*sd) #Calculating Covariance Matrix for mvrnorm() 
+cor_r_treatment <- 0.51 #Based on Costello et al. 
+cov_matrix_value_treatment <- cor_r_treatment*sqrt(sd*sd*sd*sd) #Calculating Covariance Matrix for mvrnorm() 
+df_effects_3 = data.frame(matrix(ncol=5,nrow=0, dimnames=list(NULL, c("N", "Human_Effect", "Control_Effect", 
+                                                                      "Human_Condition_Power", "Control_Condition_Power"))))
+
+while (current_n < subjects_max) {
+  sim_current <- 0
+  num_subjects <- current_n*3
+  sim_list_human <- c()
+  sim_list_human_p <- c() 
+  sim_list_control <- c()
+  sim_list_control_p <- c()
+  while (sim_current < n_sim){
+    sim_current = sim_current + 1
+    # Simulating basic DF with number of subjects in all three treatment conditions and necessary dummies
+    simulated_data <- data.frame( 
+    subject = 1:num_subjects,
+    pre_confidence = 100, 
+    post_confidence = 100,
+    treatment = rep(Treatment_levels, each = (num_subjects/3)),
+    control_dummy = rep(Control_Dummy, each = (num_subjects/3)),
+    ai_dummy = rep(AI_Dummy, each = (num_subjects/3)),
+    human_dummy = rep(Human_Dummy, each = (num_subjects/3)))
+    
+    #Simulating Post-Treatment Confidence Scores based on bivariate distribution
+    simulated_data_control <- simulated_data %>% filter(treatment == "control")
+    sample_distribution <- as.data.frame(mvrnorm(n = num_subjects/3, mu = c(mean_pre, mean_pre), 
+                                                 Sigma = matrix(c(100, cov_matrix_value_control, cov_matrix_value_control, 100), ncol = 2)))
+    simulated_data_control$pre_confidence <- sample_distribution$V1
+    simulated_data_control$post_confidence <- sample_distribution$V2
+    
+    simulated_data_AI <- simulated_data %>% filter(treatment == "AI")
+    sample_distribution <- as.data.frame(mvrnorm(n = num_subjects/3, mu = c(mean_pre, mean_pre-sd*AI_effect), 
+                                                 Sigma = matrix(c(100, cov_matrix_value_treatment, cov_matrix_value_treatment, 100), ncol = 2)))
+    simulated_data_AI$pre_confidence <- sample_distribution$V1
+    simulated_data_AI$post_confidence <- sample_distribution$V2
+    
+    simulated_data_human <- simulated_data %>% filter(treatment == "human")
+    sample_distribution <- as.data.frame(mvrnorm(n = num_subjects/3, mu = c(mean_pre, mean_pre-sd*human_effect), 
+                                                 Sigma = matrix(c(100, cov_matrix_value_treatment, cov_matrix_value_treatment, 100), ncol = 2)))
+    simulated_data_human$pre_confidence <- sample_distribution$V1
+    simulated_data_human$post_confidence <- sample_distribution$V2
+    
+    simulated_data <- rbind(simulated_data_control, simulated_data_AI, simulated_data_human) #Merging Data back together
+    simulated_data$delta = simulated_data$pre_confidence - simulated_data$post_confidence
+    lm_current <- lm(delta ~ control_dummy + human_dummy, data = simulated_data)
+    summary <- summ(lm_current, exp=TRUE)
+    
+    sim_list_human <- append(sim_list_human, summary$coeftable["human_dummy", 1])
+    sim_list_control <- append(sim_list_control, summary$coeftable["control_dummy", 1])
+    sim_list_human_p <- append(sim_list_human_p, summary$coeftable["human_dummy", 4])
+    sim_list_control_p <- append(sim_list_control_p, summary$coeftable["control_dummy", 4])
+  }
+
+    df_effects_3[nrow(df_effects_3) + 1,] = c(current_n,
+                                  mean(sim_list_human),
+                                  mean(sim_list_control),
+                                  sum(sim_list_human_p < 0.05)/n_sim,
+                                  sum(sim_list_control_p < 0.05)/n_sim)
+    current_n = current_n + subjects_step
+}
+```
+
+```{r}
+ ggplot(data = df_effects_3, aes(x = N)) + 
+  geom_point(aes(y = Human_Condition_Power * 100, color = "Human Condition")) + 
+  geom_point(aes(y = Control_Condition_Power * 100, color = "Control Condition")) + 
+  geom_hline(yintercept = 95)
+
+
+ ggplot(data = df_effects_3, aes(x = N)) + 
+  geom_point(aes(y = Human_Effect, color = "Human Condition")) + 
+  geom_point(aes(y = Control_Effect, color = "Control Condition"))
+```
+
+```{r}
+subjects_min <- 160 # per cell, not 0!
+subjects_max <- 185
+subjects_step <- 1
+current_n = subjects_min
+n_sim = 50000
+mean_pre <- 75 
+sd <- 10 
+Treatment_levels <- c("control", "AI", "human")
+Control_Dummy <- c(1,0,0)
+AI_Dummy <- c(0,1,0)
+Human_Dummy <- c(0,0,1)
+AI_effect <- 0.53
+human_effect <- 0.26
+cor_r_control <- 0.81 #Based on Costello et al. 
+cov_matrix_value_control <- cor_r_control*sqrt(sd*sd*sd*sd) #Calculating Covariance Matrix for mvrnorm() 
+cor_r_treatment <- 0.51 #Based on Costello et al. 
+cov_matrix_value_treatment <- cor_r_treatment*sqrt(sd*sd*sd*sd) #Calculating Covariance Matrix for mvrnorm() 
+df_effects_4 = data.frame(matrix(ncol=5,nrow=0, dimnames=list(NULL, c("N", "Human_Effect", "Control_Effect", 
+                                                                      "Human_Condition_Power", "Control_Condition_Power"))))
+
+while (current_n < subjects_max) {
+  sim_current <- 0
+  num_subjects <- current_n*3
+  sim_list_human <- c()
+  sim_list_human_p <- c() 
+  sim_list_control <- c()
+  sim_list_control_p <- c()
+  while (sim_current < n_sim){
+    sim_current = sim_current + 1
+    # Simulating basic DF with number of subjects in all three treatment conditions and necessary dummies
+    simulated_data <- data.frame( 
+    subject = 1:num_subjects,
+    pre_confidence = 100, 
+    post_confidence = 100,
+    treatment = rep(Treatment_levels, each = (num_subjects/3)),
+    control_dummy = rep(Control_Dummy, each = (num_subjects/3)),
+    ai_dummy = rep(AI_Dummy, each = (num_subjects/3)),
+    human_dummy = rep(Human_Dummy, each = (num_subjects/3)))
+    
+    #Simulating Post-Treatment Confidence Scores based on bivariate distribution
+    simulated_data_control <- simulated_data %>% filter(treatment == "control")
+    sample_distribution <- as.data.frame(mvrnorm(n = num_subjects/3, mu = c(mean_pre, mean_pre), 
+                                                 Sigma = matrix(c(100, cov_matrix_value_control, cov_matrix_value_control, 100), ncol = 2)))
+    simulated_data_control$pre_confidence <- sample_distribution$V1
+    simulated_data_control$post_confidence <- sample_distribution$V2
+    
+    simulated_data_AI <- simulated_data %>% filter(treatment == "AI")
+    sample_distribution <- as.data.frame(mvrnorm(n = num_subjects/3, mu = c(mean_pre, mean_pre-sd*AI_effect), 
+                                                 Sigma = matrix(c(100, cov_matrix_value_treatment, cov_matrix_value_treatment, 100), ncol = 2)))
+    simulated_data_AI$pre_confidence <- sample_distribution$V1
+    simulated_data_AI$post_confidence <- sample_distribution$V2
+    
+    simulated_data_human <- simulated_data %>% filter(treatment == "human")
+    sample_distribution <- as.data.frame(mvrnorm(n = num_subjects/3, mu = c(mean_pre, mean_pre-sd*human_effect), 
+                                                 Sigma = matrix(c(100, cov_matrix_value_treatment, cov_matrix_value_treatment, 100), ncol = 2)))
+    simulated_data_human$pre_confidence <- sample_distribution$V1
+    simulated_data_human$post_confidence <- sample_distribution$V2
+    
+    simulated_data <- rbind(simulated_data_control, simulated_data_AI, simulated_data_human) #Merging Data back together
+    simulated_data$delta = simulated_data$pre_confidence - simulated_data$post_confidence
+    lm_current <- lm(delta ~ control_dummy + human_dummy, data = simulated_data)
+    summary <- summ(lm_current, exp=TRUE)
+    
+    sim_list_human <- append(sim_list_human, summary$coeftable["human_dummy", 1])
+    sim_list_control <- append(sim_list_control, summary$coeftable["control_dummy", 1])
+    sim_list_human_p <- append(sim_list_human_p, summary$coeftable["human_dummy", 4])
+    sim_list_control_p <- append(sim_list_control_p, summary$coeftable["control_dummy", 4])
+  }
+
+    df_effects_4[nrow(df_effects_4) + 1,] = c(current_n,
+                                  mean(sim_list_human),
+                                  mean(sim_list_control),
+                                  sum(sim_list_human_p < 0.05)/n_sim,
+                                  sum(sim_list_control_p < 0.05)/n_sim)
+    current_n = current_n + subjects_step
+}
+```
+
+```{r}
+ ggplot(data = df_effects_4, aes(x = N)) + 
+  geom_point(aes(y = Human_Condition_Power * 100, color = "Human Condition")) + 
+  geom_point(aes(y = Control_Condition_Power * 100, color = "Control Condition")) + 
+  geom_hline(yintercept = 80)
+
+
+ ggplot(data = df_effects_4, aes(x = N)) + 
+  geom_point(aes(y = Human_Effect, color = "Human Condition")) + 
+  geom_point(aes(y = Control_Effect, color = "Control Condition"))
+```
